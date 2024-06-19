@@ -53,13 +53,21 @@ const (
 	// AuthnServiceGetCurrentUserSubjectProcedure is the fully-qualified name of the AuthnService's
 	// GetCurrentUserSubject RPC.
 	AuthnServiceGetCurrentUserSubjectProcedure = "/buf.alpha.registry.v1alpha1.AuthnService/GetCurrentUserSubject"
+	// AuthnServiceGetDeviceAuthorizationGrantProcedure is the fully-qualified name of the
+	// AuthnService's GetDeviceAuthorizationGrant RPC.
+	AuthnServiceGetDeviceAuthorizationGrantProcedure = "/buf.alpha.registry.v1alpha1.AuthnService/GetDeviceAuthorizationGrant"
+	// AuthnServiceUpdateDeviceAuthorizationGrantProcedure is the fully-qualified name of the
+	// AuthnService's UpdateDeviceAuthorizationGrant RPC.
+	AuthnServiceUpdateDeviceAuthorizationGrantProcedure = "/buf.alpha.registry.v1alpha1.AuthnService/UpdateDeviceAuthorizationGrant"
 )
 
 // These variables are the protoreflect.Descriptor objects for the RPCs defined in this package.
 var (
-	authnServiceServiceDescriptor                     = v1alpha1.File_buf_alpha_registry_v1alpha1_authn_proto.Services().ByName("AuthnService")
-	authnServiceGetCurrentUserMethodDescriptor        = authnServiceServiceDescriptor.Methods().ByName("GetCurrentUser")
-	authnServiceGetCurrentUserSubjectMethodDescriptor = authnServiceServiceDescriptor.Methods().ByName("GetCurrentUserSubject")
+	authnServiceServiceDescriptor                              = v1alpha1.File_buf_alpha_registry_v1alpha1_authn_proto.Services().ByName("AuthnService")
+	authnServiceGetCurrentUserMethodDescriptor                 = authnServiceServiceDescriptor.Methods().ByName("GetCurrentUser")
+	authnServiceGetCurrentUserSubjectMethodDescriptor          = authnServiceServiceDescriptor.Methods().ByName("GetCurrentUserSubject")
+	authnServiceGetDeviceAuthorizationGrantMethodDescriptor    = authnServiceServiceDescriptor.Methods().ByName("GetDeviceAuthorizationGrant")
+	authnServiceUpdateDeviceAuthorizationGrantMethodDescriptor = authnServiceServiceDescriptor.Methods().ByName("UpdateDeviceAuthorizationGrant")
 )
 
 // AuthnServiceClient is a client for the buf.alpha.registry.v1alpha1.AuthnService service.
@@ -72,6 +80,10 @@ type AuthnServiceClient interface {
 	//
 	// The user's ID is retrieved from the request's authentication header.
 	GetCurrentUserSubject(context.Context, *connect.Request[v1alpha1.GetCurrentUserSubjectRequest]) (*connect.Response[v1alpha1.GetCurrentUserSubjectResponse], error)
+	// GetDeviceAuthorizationGrant gets the device authorization grant for the given user code.
+	GetDeviceAuthorizationGrant(context.Context, *connect.Request[v1alpha1.GetDeviceAuthorizationGrantRequest]) (*connect.Response[v1alpha1.GetDeviceAuthorizationGrantResponse], error)
+	// UpdateDeviceAuthorizationGrant updates the device authorization grant for the given user code.
+	UpdateDeviceAuthorizationGrant(context.Context, *connect.Request[v1alpha1.UpdateDeviceAuthorizationGrantRequest]) (*connect.Response[v1alpha1.UpdateDeviceAuthorizationGrantResponse], error)
 }
 
 // NewAuthnServiceClient constructs a client for the buf.alpha.registry.v1alpha1.AuthnService
@@ -98,13 +110,27 @@ func NewAuthnServiceClient(httpClient connect.HTTPClient, baseURL string, opts .
 			connect.WithIdempotency(connect.IdempotencyNoSideEffects),
 			connect.WithClientOptions(opts...),
 		),
+		getDeviceAuthorizationGrant: connect.NewClient[v1alpha1.GetDeviceAuthorizationGrantRequest, v1alpha1.GetDeviceAuthorizationGrantResponse](
+			httpClient,
+			baseURL+AuthnServiceGetDeviceAuthorizationGrantProcedure,
+			connect.WithSchema(authnServiceGetDeviceAuthorizationGrantMethodDescriptor),
+			connect.WithClientOptions(opts...),
+		),
+		updateDeviceAuthorizationGrant: connect.NewClient[v1alpha1.UpdateDeviceAuthorizationGrantRequest, v1alpha1.UpdateDeviceAuthorizationGrantResponse](
+			httpClient,
+			baseURL+AuthnServiceUpdateDeviceAuthorizationGrantProcedure,
+			connect.WithSchema(authnServiceUpdateDeviceAuthorizationGrantMethodDescriptor),
+			connect.WithClientOptions(opts...),
+		),
 	}
 }
 
 // authnServiceClient implements AuthnServiceClient.
 type authnServiceClient struct {
-	getCurrentUser        *connect.Client[v1alpha1.GetCurrentUserRequest, v1alpha1.GetCurrentUserResponse]
-	getCurrentUserSubject *connect.Client[v1alpha1.GetCurrentUserSubjectRequest, v1alpha1.GetCurrentUserSubjectResponse]
+	getCurrentUser                 *connect.Client[v1alpha1.GetCurrentUserRequest, v1alpha1.GetCurrentUserResponse]
+	getCurrentUserSubject          *connect.Client[v1alpha1.GetCurrentUserSubjectRequest, v1alpha1.GetCurrentUserSubjectResponse]
+	getDeviceAuthorizationGrant    *connect.Client[v1alpha1.GetDeviceAuthorizationGrantRequest, v1alpha1.GetDeviceAuthorizationGrantResponse]
+	updateDeviceAuthorizationGrant *connect.Client[v1alpha1.UpdateDeviceAuthorizationGrantRequest, v1alpha1.UpdateDeviceAuthorizationGrantResponse]
 }
 
 // GetCurrentUser calls buf.alpha.registry.v1alpha1.AuthnService.GetCurrentUser.
@@ -117,6 +143,18 @@ func (c *authnServiceClient) GetCurrentUserSubject(ctx context.Context, req *con
 	return c.getCurrentUserSubject.CallUnary(ctx, req)
 }
 
+// GetDeviceAuthorizationGrant calls
+// buf.alpha.registry.v1alpha1.AuthnService.GetDeviceAuthorizationGrant.
+func (c *authnServiceClient) GetDeviceAuthorizationGrant(ctx context.Context, req *connect.Request[v1alpha1.GetDeviceAuthorizationGrantRequest]) (*connect.Response[v1alpha1.GetDeviceAuthorizationGrantResponse], error) {
+	return c.getDeviceAuthorizationGrant.CallUnary(ctx, req)
+}
+
+// UpdateDeviceAuthorizationGrant calls
+// buf.alpha.registry.v1alpha1.AuthnService.UpdateDeviceAuthorizationGrant.
+func (c *authnServiceClient) UpdateDeviceAuthorizationGrant(ctx context.Context, req *connect.Request[v1alpha1.UpdateDeviceAuthorizationGrantRequest]) (*connect.Response[v1alpha1.UpdateDeviceAuthorizationGrantResponse], error) {
+	return c.updateDeviceAuthorizationGrant.CallUnary(ctx, req)
+}
+
 // AuthnServiceHandler is an implementation of the buf.alpha.registry.v1alpha1.AuthnService service.
 type AuthnServiceHandler interface {
 	// GetCurrentUser gets information associated with the current user.
@@ -127,6 +165,10 @@ type AuthnServiceHandler interface {
 	//
 	// The user's ID is retrieved from the request's authentication header.
 	GetCurrentUserSubject(context.Context, *connect.Request[v1alpha1.GetCurrentUserSubjectRequest]) (*connect.Response[v1alpha1.GetCurrentUserSubjectResponse], error)
+	// GetDeviceAuthorizationGrant gets the device authorization grant for the given user code.
+	GetDeviceAuthorizationGrant(context.Context, *connect.Request[v1alpha1.GetDeviceAuthorizationGrantRequest]) (*connect.Response[v1alpha1.GetDeviceAuthorizationGrantResponse], error)
+	// UpdateDeviceAuthorizationGrant updates the device authorization grant for the given user code.
+	UpdateDeviceAuthorizationGrant(context.Context, *connect.Request[v1alpha1.UpdateDeviceAuthorizationGrantRequest]) (*connect.Response[v1alpha1.UpdateDeviceAuthorizationGrantResponse], error)
 }
 
 // NewAuthnServiceHandler builds an HTTP handler from the service implementation. It returns the
@@ -149,12 +191,28 @@ func NewAuthnServiceHandler(svc AuthnServiceHandler, opts ...connect.HandlerOpti
 		connect.WithIdempotency(connect.IdempotencyNoSideEffects),
 		connect.WithHandlerOptions(opts...),
 	)
+	authnServiceGetDeviceAuthorizationGrantHandler := connect.NewUnaryHandler(
+		AuthnServiceGetDeviceAuthorizationGrantProcedure,
+		svc.GetDeviceAuthorizationGrant,
+		connect.WithSchema(authnServiceGetDeviceAuthorizationGrantMethodDescriptor),
+		connect.WithHandlerOptions(opts...),
+	)
+	authnServiceUpdateDeviceAuthorizationGrantHandler := connect.NewUnaryHandler(
+		AuthnServiceUpdateDeviceAuthorizationGrantProcedure,
+		svc.UpdateDeviceAuthorizationGrant,
+		connect.WithSchema(authnServiceUpdateDeviceAuthorizationGrantMethodDescriptor),
+		connect.WithHandlerOptions(opts...),
+	)
 	return "/buf.alpha.registry.v1alpha1.AuthnService/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case AuthnServiceGetCurrentUserProcedure:
 			authnServiceGetCurrentUserHandler.ServeHTTP(w, r)
 		case AuthnServiceGetCurrentUserSubjectProcedure:
 			authnServiceGetCurrentUserSubjectHandler.ServeHTTP(w, r)
+		case AuthnServiceGetDeviceAuthorizationGrantProcedure:
+			authnServiceGetDeviceAuthorizationGrantHandler.ServeHTTP(w, r)
+		case AuthnServiceUpdateDeviceAuthorizationGrantProcedure:
+			authnServiceUpdateDeviceAuthorizationGrantHandler.ServeHTTP(w, r)
 		default:
 			http.NotFound(w, r)
 		}
@@ -170,4 +228,12 @@ func (UnimplementedAuthnServiceHandler) GetCurrentUser(context.Context, *connect
 
 func (UnimplementedAuthnServiceHandler) GetCurrentUserSubject(context.Context, *connect.Request[v1alpha1.GetCurrentUserSubjectRequest]) (*connect.Response[v1alpha1.GetCurrentUserSubjectResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("buf.alpha.registry.v1alpha1.AuthnService.GetCurrentUserSubject is not implemented"))
+}
+
+func (UnimplementedAuthnServiceHandler) GetDeviceAuthorizationGrant(context.Context, *connect.Request[v1alpha1.GetDeviceAuthorizationGrantRequest]) (*connect.Response[v1alpha1.GetDeviceAuthorizationGrantResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("buf.alpha.registry.v1alpha1.AuthnService.GetDeviceAuthorizationGrant is not implemented"))
+}
+
+func (UnimplementedAuthnServiceHandler) UpdateDeviceAuthorizationGrant(context.Context, *connect.Request[v1alpha1.UpdateDeviceAuthorizationGrantRequest]) (*connect.Response[v1alpha1.UpdateDeviceAuthorizationGrantResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("buf.alpha.registry.v1alpha1.AuthnService.UpdateDeviceAuthorizationGrant is not implemented"))
 }

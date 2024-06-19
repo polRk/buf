@@ -17,6 +17,7 @@ syntax = "proto3";
 package buf.alpha.registry.v1alpha1;
 
 import "buf/alpha/registry/v1alpha1/user.proto";
+import "google/protobuf/timestamp.proto";
 
 // AuthnService supplies authenication helpers.
 service AuthnService {
@@ -32,6 +33,10 @@ service AuthnService {
   rpc GetCurrentUserSubject(GetCurrentUserSubjectRequest) returns (GetCurrentUserSubjectResponse) {
     option idempotency_level = NO_SIDE_EFFECTS;
   }
+  // GetDeviceAuthorizationGrant gets the device authorization grant for the given user code.
+  rpc GetDeviceAuthorizationGrant(GetDeviceAuthorizationGrantRequest) returns (GetDeviceAuthorizationGrantResponse) {}
+  // UpdateDeviceAuthorizationGrant updates the device authorization grant for the given user code.
+  rpc UpdateDeviceAuthorizationGrant(UpdateDeviceAuthorizationGrantRequest) returns (UpdateDeviceAuthorizationGrantResponse) {}
 }
 
 message GetCurrentUserRequest {}
@@ -48,4 +53,34 @@ message GetCurrentUserSubjectResponse {
   // it contains potentially sensitive information and the User
   // response is shared with other users.
   string subject = 1;
+}
+
+enum DeviceAuthorizationGrantStatus {
+  DEVICE_AUTHORIZATION_GRANT_STATUS_UNSPECIFIED = 0;
+  DEVICE_AUTHORIZATION_GRANT_STATUS_PENDING = 1;
+  DEVICE_AUTHORIZATION_GRANT_STATUS_APPROVED = 2;
+  DEVICE_AUTHORIZATION_GRANT_STATUS_DENIED = 3;
+}
+
+message GetDeviceAuthorizationGrantRequest {
+  string user_code = 1;
+}
+
+message GetDeviceAuthorizationGrantResponse {
+  string user_code = 1;
+  DeviceAuthorizationGrantStatus status = 2;
+  string token_name = 3;
+  google.protobuf.Timestamp token_expire_time = 4;
+}
+
+message UpdateDeviceAuthorizationGrantRequest {
+  string user_code = 1;
+  optional DeviceAuthorizationGrantStatus status = 2;
+  optional string token_name = 3;
+  optional google.protobuf.Timestamp token_expire_time = 4;
+}
+
+message UpdateDeviceAuthorizationGrantResponse {
+  string user_code = 2;
+  DeviceAuthorizationGrantStatus status = 3;
 }
