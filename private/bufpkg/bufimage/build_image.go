@@ -169,7 +169,6 @@ func getBuildResult(
 		)
 	}
 	for i, fileDescriptor := range compiledFiles {
-		i := i
 		path := paths[i]
 		filename := fileDescriptor.Path()
 		// doing another rough verification
