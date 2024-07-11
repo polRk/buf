@@ -144,6 +144,7 @@ func copyPaths(
 	var count atomic.Int64
 	jobs := make([]func(context.Context) error, len(paths))
 	for i, path := range paths {
+		i := i
 		path := path
 		jobs[i] = func(ctx context.Context) error {
 			if err := copyPath(ctx, from, path, to, path, copyExternalAndLocalPaths, atomicOpt); err != nil {
