@@ -25,6 +25,7 @@ import (
 	"github.com/bufbuild/buf/private/pkg/slicesext"
 	"github.com/bufbuild/buf/private/pkg/storage"
 	"github.com/bufbuild/buf/private/pkg/storage/storagemem"
+	"github.com/bufbuild/buf/private/pkg/storage/storageos"
 	"github.com/bufbuild/buf/private/pkg/zaputil"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap/zapcore"
@@ -40,13 +41,34 @@ func TestModuleDataStoreBasicTar(t *testing.T) {
 	testModuleDataStoreBasic(t, true)
 }
 
+func TestModuleDataStoreOS(t *testing.T) {
+	t.Parallel()
+	testModuleDataStoreOS(t)
+}
+
 func testModuleDataStoreBasic(t *testing.T, tar bool) {
-	ctx := context.Background()
 	bucket := storagemem.NewReadWriteBucket()
 	var moduleDataStoreOptions []ModuleDataStoreOption
 	if tar {
 		moduleDataStoreOptions = append(moduleDataStoreOptions, ModuleDataStoreWithTar())
 	}
+	testModuleDataStore(t, bucket, moduleDataStoreOptions, tar)
+}
+
+func testModuleDataStoreOS(t *testing.T) {
+	tempDir := t.TempDir()
+	bucket, err := storageos.NewProvider().NewReadWriteBucket(tempDir)
+	require.NoError(t, err)
+	testModuleDataStore(t, bucket, nil, false)
+}
+
+func testModuleDataStore(
+	t *testing.T,
+	bucket storage.ReadWriteBucket,
+	moduleDataStoreOptions []ModuleDataStoreOption,
+	tar bool,
+) {
+	ctx := context.Background()
 	logger := zaputil.NewLogger(os.Stderr, zapcore.DebugLevel, zaputil.NewTextEncoder())
 	moduleDataStore := NewModuleDataStore(logger, bucket, moduleDataStoreOptions...)
 	moduleKeys, moduleDatas := testGetModuleKeysAndModuleDatas(t, ctx)
