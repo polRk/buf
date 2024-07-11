@@ -129,9 +129,7 @@ func (p *moduleDataStore) GetModuleDatasForModuleKeys(
 	for _, moduleKey := range moduleKeys {
 		moduleData, err := p.getModuleDataForModuleKey(ctx, moduleKey)
 		if err != nil {
-			if !errors.Is(err, fs.ErrNotExist) {
-				return nil, nil, err
-			}
+			// Treat any error returned as a cache miss
 			notFoundModuleKeys = append(notFoundModuleKeys, moduleKey)
 		} else {
 			foundModuleDatas = append(foundModuleDatas, moduleData)
@@ -162,7 +160,17 @@ func (p *moduleDataStore) getModuleDataForModuleKey(
 		moduleCacheBucket, err = p.getReadBucketForTar(ctx, moduleKey)
 		if err != nil {
 			if !errors.Is(err, fs.ErrNotExist) {
-				return nil, p.deleteInvalidModuleData(ctx, moduleKey, err)
+				// If there is an error fetching the tar bucket that is not because the path does
+				// not exist, we assume this is corrupted and delete the tar.
+				tarPath, err := getModuleDataStoreTarPath(moduleKey)
+				if err != nil {
+					return nil, err
+				}
+				if err := p.bucket.Delete(ctx, tarPath); err != nil {
+					return nil, err
+				}
+				// Return a path error indicating the module data was not found
+				return nil, &fs.PathError{Op: "read", Path: tarPath, Err: fs.ErrNotExist}
 			}
 			return nil, err
 		}
@@ -173,11 +181,6 @@ func (p *moduleDataStore) getModuleDataForModuleKey(
 			return nil, err
 		}
 	}
-	defer func() {
-		if retErr != nil {
-			retErr = p.deleteInvalidModuleData(ctx, moduleKey, retErr)
-		}
-	}()
 	data, err := storage.ReadPath(ctx, moduleCacheBucket, externalModuleDataFileName)
 	p.logDebugModuleKey(
 		moduleKey,
@@ -263,43 +266,6 @@ func (p *moduleDataStore) getModuleDataForModuleKey(
 	), nil
 }
 
-func (p *moduleDataStore) deleteInvalidModuleData(
-	ctx context.Context,
-	moduleKey bufmodule.ModuleKey,
-	invalidErr error,
-) (retErr error) {
-	p.logDebugModuleKey(
-		moduleKey,
-		"module data store invalid module data",
-		zap.Error(invalidErr),
-	)
-	defer func() {
-		if retErr != nil {
-			// Do not return error, just log. We always returns a file not found error.
-			p.logDebugModuleKey(
-				moduleKey,
-				"module data store could not delete module data",
-				zap.Error(retErr),
-			)
-		}
-		// This will act as if the file is not found.
-		retErr = &fs.PathError{Op: "read", Path: moduleKey.String(), Err: fs.ErrNotExist}
-	}()
-
-	if p.tar {
-		tarPath, err := getModuleDataStoreTarPath(moduleKey)
-		if err != nil {
-			return err
-		}
-		return p.bucket.Delete(ctx, tarPath)
-	}
-	dirPath, err := getModuleDataStoreDirPath(moduleKey)
-	if err != nil {
-		return err
-	}
-	return p.bucket.DeleteAll(ctx, dirPath)
-}
-
 func (p *moduleDataStore) putModuleData(
 	ctx context.Context,
 	moduleData bufmodule.ModuleData,
@@ -363,7 +329,13 @@ func (p *moduleDataStore) putModuleData(
 	}
 	if v1BufYAMLObjectData != nil {
 		v1BufYAMLFilePath := normalpath.Join(externalModuleDataV1BufYAMLDir, v1BufYAMLObjectData.Name())
-		if err := storage.PutPath(ctx, moduleCacheBucket, v1BufYAMLFilePath, v1BufYAMLObjectData.Data()); err != nil {
+		if err := storage.PutPath(
+			ctx,
+			moduleCacheBucket,
+			v1BufYAMLFilePath,
+			v1BufYAMLObjectData.Data(),
+			storage.PutWithAtomic(),
+		); err != nil {
 			return err
 		}
 		externalModuleData.V1BufYAMLFile = v1BufYAMLFilePath
@@ -375,7 +347,13 @@ func (p *moduleDataStore) putModuleData(
 	}
 	if v1BufLockObjectData != nil {
 		v1BufLockFilePath := normalpath.Join(externalModuleDataV1BufLockDir, v1BufLockObjectData.Name())
-		if err := storage.PutPath(ctx, moduleCacheBucket, v1BufLockFilePath, v1BufLockObjectData.Data()); err != nil {
+		if err := storage.PutPath(
+			ctx,
+			moduleCacheBucket,
+			v1BufLockFilePath,
+			v1BufLockObjectData.Data(),
+			storage.PutWithAtomic(),
+		); err != nil {
 			return err
 		}
 		externalModuleData.V1BufLockFile = v1BufLockFilePath
@@ -388,7 +366,13 @@ func (p *moduleDataStore) putModuleData(
 	// Put the module.yaml last, so that we only have a module.yaml if the cache is finished writing.
 	// We can use the existence of the module.yaml file to say whether or not the cache contains a
 	// given ModuleKey, otherwise we overwrite any contents in the cache.
-	return storage.PutPath(ctx, moduleCacheBucket, externalModuleDataFileName, data)
+	return storage.PutPath(
+		ctx,
+		moduleCacheBucket,
+		externalModuleDataFileName,
+		data,
+		storage.PutWithAtomic(),
+	)
 }
 
 // Only returns error on actual system error.
