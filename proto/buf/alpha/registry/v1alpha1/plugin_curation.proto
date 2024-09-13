@@ -492,6 +492,8 @@ message CreateCuratedPluginRequest {
   CuratedPluginVisibility visibility = 17;
   // The URL leading to the integration guide of the plugin, if available.
   string integration_guide_url = 18;
+  // WASM module for the plugin.
+  bytes wasm_module = 19;
 }
 
 message CreateCuratedPluginResponse {
