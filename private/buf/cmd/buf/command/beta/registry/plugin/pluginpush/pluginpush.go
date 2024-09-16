@@ -56,6 +56,7 @@ const (
 	disableSymlinksFlagName = "disable-symlinks"
 	overrideRemoteFlagName  = "override-remote"
 	imageFlagName           = "image"
+	wasmFlagName            = "wasm"
 	visibilityFlagName      = "visibility"
 
 	publicVisibility  = "public"
@@ -92,6 +93,7 @@ type flags struct {
 	DisableSymlinks bool
 	OverrideRemote  string
 	Image           string
+	WASM            string
 	Visibility      string
 }
 
@@ -118,6 +120,12 @@ func (f *flags) Bind(flagSet *pflag.FlagSet) {
 		imageFlagName,
 		"",
 		"Existing image to push",
+	)
+	flagSet.StringVar(
+		&f.WASM,
+		wasmFlagName,
+		"",
+		"Path to the wasm binary",
 	)
 	flagSet.StringVar(
 		&f.Visibility,
@@ -192,38 +200,12 @@ func run(
 	if err != nil {
 		return err
 	}
-	client, err := bufremoteplugindocker.NewClient(container.Logger(), bufcli.Version)
-	if err != nil {
-		return err
+	// Docker...
+	// ...
+	if flags.Image != "" && flags.WASM != "" {
+		return fmt.Errorf("cannot specify both --%s and --%s", flags.Image, flags.WASM)
 	}
-	defer func() {
-		if err := client.Close(); err != nil {
-			retErr = multierr.Append(retErr, fmt.Errorf("docker client close error: %w", err))
-		}
-	}()
-	var imageID string
-	if flags.Image != "" {
-		inspectResponse, err := client.Inspect(ctx, flags.Image)
-		if err != nil {
-			return err
-		}
-		imageID = inspectResponse.ImageID
-	} else {
-		image, err := loadDockerImage(ctx, sourceBucket)
-		if err != nil {
-			return err
-		}
-		loadResponse, err := client.Load(ctx, image)
-		if err != nil {
-			return err
-		}
-		defer func() {
-			if err := image.Close(); err != nil && !errors.Is(err, storage.ErrClosed) {
-				retErr = multierr.Append(retErr, fmt.Errorf("docker image close error: %w", err))
-			}
-		}()
-		imageID = loadResponse.ImageID
-	}
+
 	visibility, err := visibilityFlagToVisibility(flags.Visibility)
 	if err != nil {
 		return err
@@ -248,20 +230,71 @@ func run(
 			},
 		),
 	)
-	var currentImageDigest string
-	var nextRevision uint32
-	if err != nil {
-		if connect.CodeOf(err) != connect.CodeNotFound {
+	var latestCuratedPlugin *registryv1alpha1.CuratedPlugin
+	if err != nil && connect.CodeOf(err) != connect.CodeNotFound {
+		return err
+	} else {
+		latestCuratedPlugin = latestPluginResp.Msg.GetPlugin()
+	}
+
+	// Push the plugin
+	var curatedPlugin *registryv1alpha1.CuratedPlugin
+	switch {
+	case flags.WASM != "":
+		curatedPlugin, err = pushWASMCuratedPlugin(
+			ctx,
+			container,
+			flags.WASM,
+			sourceBucket,
+			service,
+			pluginConfig,
+			visibility,
+			latestCuratedPlugin,
+		)
+		if err != nil {
 			return err
 		}
-		nextRevision = 1
-	} else {
-		nextRevision = latestPluginResp.Msg.Plugin.Revision + 1
-		currentImageDigest = latestPluginResp.Msg.Plugin.ContainerImageDigest
+	default:
+		curatedPlugin, err = pushDockerCuratedPlugin(
+			ctx,
+			container,
+			flags.Image, // may be empty
+			sourceBucket,
+			service,
+			pluginConfig,
+			visibility,
+			latestCuratedPlugin,
+		)
+		if err != nil {
+			return err
+		}
 	}
+	fmt.Println(curatedPlugin)
+	return bufprint.NewCuratedPluginPrinter(container.Stdout()).PrintCuratedPlugin(ctx, format, curatedPlugin)
+}
+
+func pushDockerCuratedPlugin(
+	ctx context.Context,
+	container appext.Container,
+	image string,
+	sourceBucket storage.ReadBucket,
+	service registryv1alpha1connect.PluginCurationServiceClient,
+	pluginConfig *bufremotepluginconfig.Config,
+	visibility registryv1alpha1.CuratedPluginVisibility,
+	lastestCuratedPlugin *registryv1alpha1.CuratedPlugin,
+) (curatedPlugin *registryv1alpha1.CuratedPlugin, retErr error) {
+	client, err := bufremoteplugindocker.NewClient(container.Logger(), bufcli.Version)
+	if err != nil {
+		return nil, err
+	}
+	defer func() {
+		if err := client.Close(); err != nil {
+			retErr = multierr.Append(retErr, fmt.Errorf("docker client close error: %w", err))
+		}
+	}()
 	machine, err := netrc.GetMachineForName(container, pluginConfig.Name.Remote())
 	if err != nil {
-		return err
+		return nil, err
 	}
 	authConfig := &bufremoteplugindocker.RegistryAuthConfig{}
 	if machine != nil {
@@ -269,14 +302,19 @@ func run(
 		authConfig.Username = machine.Login()
 		authConfig.Password = machine.Password()
 	}
+	imageID, err := findDockerImageID(ctx, client, sourceBucket, image)
+	if err != nil {
+		return nil, err
+	}
+	currentImageDigest := lastestCuratedPlugin.GetContainerImageDigest()
 	imageDigest, err := findExistingDigestForImageID(ctx, pluginConfig, authConfig, imageID, currentImageDigest)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if imageDigest == "" {
 		imageDigest, err = pushImage(ctx, client, authConfig, pluginConfig, imageID)
 		if err != nil {
-			return err
+			return nil, err
 		}
 	} else {
 		container.Logger().Info("image found in registry - skipping push")
@@ -290,17 +328,19 @@ func run(
 		pluginConfig.Description,
 	)
 	if err != nil {
-		return err
+		return nil, err
 	}
+	nextRevision := lastestCuratedPlugin.GetRevision() + 1
+
 	createRequest, err := createCuratedPluginRequest(pluginConfig, plugin, nextRevision, visibility)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	var curatedPlugin *registryv1alpha1.CuratedPlugin
+
 	createPluginResp, err := service.CreateCuratedPlugin(ctx, connect.NewRequest(createRequest))
 	if err != nil {
 		if connect.CodeOf(err) != connect.CodeAlreadyExists {
-			return err
+			return nil, err
 		}
 		// Plugin with the same image digest and metadata already exists
 		container.Logger().Info(
@@ -308,12 +348,97 @@ func run(
 			zap.String("name", pluginConfig.Name.IdentityString()),
 			zap.String("digest", plugin.ContainerImageDigest()),
 		)
-		curatedPlugin = latestPluginResp.Msg.Plugin
-	} else {
-		curatedPlugin = createPluginResp.Msg.Configuration
+		return lastestCuratedPlugin, nil
 	}
-	return bufprint.NewCuratedPluginPrinter(container.Stdout()).PrintCuratedPlugin(ctx, format, curatedPlugin)
+	return createPluginResp.Msg.GetConfiguration(), nil
 }
+
+func pushWASMCuratedPlugin(
+	ctx context.Context,
+	container appext.Container,
+	wasm string,
+	sourceBucket storage.ReadBucket,
+	service registryv1alpha1connect.PluginCurationServiceClient,
+	pluginConfig *bufremotepluginconfig.Config,
+	visibility registryv1alpha1.CuratedPluginVisibility,
+	lastestCuratedPlugin *registryv1alpha1.CuratedPlugin,
+) (curatedPlugin *registryv1alpha1.CuratedPlugin, retErr error) {
+	// TODO: something
+
+	// loading the wasm file
+	fmt.Printf("config %+v\n", pluginConfig)
+	fmt.Println("loading wasm file", wasm)
+	if wasm == "" {
+		return nil, errors.New("wasm file not specified")
+	}
+	wasmModuleBytes, err := storage.ReadPath(ctx, sourceBucket, wasm)
+	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return nil, fmt.Errorf("unable to find a %s plugin image: %w", bufremoteplugindocker.ImagePath, err)
+		}
+		return nil, err
+	}
+	fmt.Println("wasm file loaded", len(wasmModuleBytes))
+	// TODO: pass the digest of the wasm file to the plugin?
+
+	plugin, err := bufremoteplugin.NewPlugin(
+		pluginConfig.PluginVersion,
+		pluginConfig.Dependencies,
+		pluginConfig.Registry,
+		"", // no image digest for wasm
+		pluginConfig.SourceURL,
+		pluginConfig.Description,
+	)
+	if err != nil {
+		return nil, err
+	}
+	nextRevision := lastestCuratedPlugin.GetRevision() + 1
+
+	protoRegistryConfig, err := bufremoteplugin.PluginRegistryToProtoRegistryConfig(plugin.Registry())
+	if err != nil {
+		return nil, err
+	}
+
+	// TODO: add wasm blob somewhere here.
+	createCuratedPluginRequest := &registryv1alpha1.CreateCuratedPluginRequest{
+		Owner:                pluginConfig.Name.Owner(),
+		Name:                 pluginConfig.Name.Plugin(),
+		RegistryType:         bufremoteplugin.PluginToProtoPluginRegistryType(plugin),
+		Version:              plugin.Version(),
+		ContainerImageDigest: "", // no image digest
+		Dependencies:         bufremoteplugin.PluginReferencesToCuratedProtoPluginReferences(plugin.Dependencies()),
+		SourceUrl:            plugin.SourceURL(),
+		Description:          plugin.Description(),
+		RegistryConfig:       protoRegistryConfig,
+		Revision:             nextRevision,
+		OutputLanguages:      nil, // No output languages for wasm
+		SpdxLicenseId:        pluginConfig.SPDXLicenseID,
+		LicenseUrl:           pluginConfig.LicenseURL,
+		Visibility:           visibility,
+		IntegrationGuideUrl:  pluginConfig.IntegrationGuideURL,
+		WasmModule:           wasmModuleBytes,
+	}
+	fmt.Println("created curated plugin request", createCuratedPluginRequest)
+
+	createPluginResp, err := service.CreateCuratedPlugin(
+		ctx, connect.NewRequest(createCuratedPluginRequest),
+	)
+	if err != nil {
+		if connect.CodeOf(err) != connect.CodeAlreadyExists {
+			return nil, err
+		}
+		// Plugin with the same image digest and metadata already exists
+		container.Logger().Info(
+			"plugin already exists",
+			zap.String("name", pluginConfig.Name.IdentityString()),
+			zap.String("digest", plugin.ContainerImageDigest()),
+		)
+		return lastestCuratedPlugin, nil
+	}
+	return createPluginResp.Msg.GetConfiguration(), nil
+}
+
+//func getRevision(ctx context.Context, service registryv1alpha1connect.PluginCurationServiceClient) (
 
 func createCuratedPluginRequest(
 	pluginConfig *bufremotepluginconfig.Config,
@@ -521,12 +646,34 @@ func unzipPluginToSourceBucket(ctx context.Context, pluginZip string, size int64
 	return storagearchive.Unzip(ctx, f, size, bucket)
 }
 
-func loadDockerImage(ctx context.Context, bucket storage.ReadBucket) (storage.ReadObjectCloser, error) {
-	image, err := bucket.Get(ctx, bufremoteplugindocker.ImagePath)
-	if errors.Is(err, fs.ErrNotExist) {
-		return nil, fmt.Errorf("unable to find a %s plugin image: %w", bufremoteplugindocker.ImagePath, err)
+func findDockerImageID(
+	ctx context.Context,
+	client bufremoteplugindocker.Client,
+	bucket storage.ReadBucket,
+	image string,
+) (imageID string, retErr error) {
+	if image != "" {
+		inspectResponse, err := client.Inspect(ctx, image)
+		if err != nil {
+			return "", err
+		}
+		return inspectResponse.ImageID, nil
 	}
-	return image, nil
+	imageObject, err := bucket.Get(ctx, bufremoteplugindocker.ImagePath)
+	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return "", fmt.Errorf("unable to find a %s plugin image: %w", bufremoteplugindocker.ImagePath, err)
+		}
+		return "", err
+	}
+	defer func() {
+		multierr.Append(retErr, imageObject.Close())
+	}()
+	loadResponse, err := client.Load(ctx, imageObject)
+	if err != nil {
+		return "", err
+	}
+	return loadResponse.ImageID, nil
 }
 
 func visibilityFlagToVisibility(visibility string) (registryv1alpha1.CuratedPluginVisibility, error) {
