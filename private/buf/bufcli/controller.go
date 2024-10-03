@@ -18,6 +18,7 @@ import (
 	"github.com/bufbuild/buf/private/buf/bufctl"
 	"github.com/bufbuild/buf/private/bufpkg/bufapi"
 	"github.com/bufbuild/buf/private/bufpkg/bufmodule/bufmoduleapi"
+	"github.com/bufbuild/buf/private/bufpkg/bufplugin/bufpluginapi"
 	"github.com/bufbuild/buf/private/pkg/app/appext"
 )
 
@@ -49,6 +50,10 @@ func NewController(
 	if err != nil {
 		return nil, err
 	}
+	pluginDataProvider, err := newPluginDataProvider(container, clientProvider)
+	if err != nil {
+		return nil, err
+	}
 	return bufctl.NewController(
 		container.Logger(),
 		container,
@@ -56,6 +61,8 @@ func NewController(
 		bufmoduleapi.NewModuleKeyProvider(container.Logger(), clientProvider),
 		moduleDataProvider,
 		commitProvider,
+		bufpluginapi.NewPluginKeyProvider(container.Logger(), clientProvider),
+		pluginDataProvider,
 		wktStore,
 		// TODO FUTURE: Delete defaultHTTPClient and use the one from newConfig
 		defaultHTTPClient,

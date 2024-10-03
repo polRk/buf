@@ -124,13 +124,25 @@ func run(
 		"all deps",
 		slog.Any("deps", slicesext.Map(configuredDepModuleKeys, bufmodule.ModuleKey.String)),
 	)
+	configuredRemotePluginRefs, err := workspaceDepManager.ConfiguredRemotePluginRefs(ctx)
+	if err != nil {
+		return err
+	}
+	configuredRemotePluginKeys, err := internal.PluginKeysForPluginRefs(
+		ctx,
+		container,
+		configuredRemotePluginRefs,
+	)
+	if err != nil {
+		return err
+	}
 
 	// Store the existing buf.lock data.
 	existingDepModuleKeys, err := workspaceDepManager.ExistingBufLockFileDepModuleKeys(ctx)
 	if err != nil {
 		return err
 	}
-	if configuredDepModuleKeys == nil && existingDepModuleKeys == nil {
+	if configuredDepModuleKeys == nil && existingDepModuleKeys == nil && configuredRemotePluginKeys == nil {
 		// No new configured deps were found, and no existing buf.lock deps were found, so there
 		// is nothing to update, we can return here.
 		// This ensures we do not create an empty buf.lock when one did not exist in the first
@@ -148,11 +160,11 @@ func run(
 	// overlay the new buf.lock file in a union bucket.
 	defer func() {
 		if retErr != nil {
-			retErr = multierr.Append(retErr, workspaceDepManager.UpdateBufLockFile(ctx, existingDepModuleKeys))
+			retErr = multierr.Append(retErr, workspaceDepManager.UpdateBufLockFile(ctx, existingDepModuleKeys, nil /* TODO(ed) */))
 		}
 	}()
 	// Edit the buf.lock file with the unpruned dependencies.
-	if err := workspaceDepManager.UpdateBufLockFile(ctx, configuredDepModuleKeys); err != nil {
+	if err := workspaceDepManager.UpdateBufLockFile(ctx, configuredDepModuleKeys, configuredRemotePluginKeys); err != nil {
 		return err
 	}
 	workspace, err := controller.GetWorkspace(ctx, dirPath, bufctl.WithIgnoreAndDisallowV1BufWorkYAMLs())

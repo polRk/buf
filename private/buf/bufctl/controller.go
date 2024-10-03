@@ -33,6 +33,7 @@ import (
 	"github.com/bufbuild/buf/private/bufpkg/bufimage"
 	"github.com/bufbuild/buf/private/bufpkg/bufimage/bufimageutil"
 	"github.com/bufbuild/buf/private/bufpkg/bufmodule"
+	"github.com/bufbuild/buf/private/bufpkg/bufplugin"
 	"github.com/bufbuild/buf/private/bufpkg/bufreflect"
 	"github.com/bufbuild/buf/private/gen/data/datawkt"
 	imagev1 "github.com/bufbuild/buf/private/gen/proto/go/buf/alpha/image/v1"
@@ -59,6 +60,8 @@ type ImageWithConfig interface {
 	LintConfig() bufconfig.LintConfig
 	BreakingConfig() bufconfig.BreakingConfig
 	PluginConfigs() []bufconfig.PluginConfig
+	PluginKeyProvider() bufplugin.PluginKeyProvider
+	PluginDataProvider() bufplugin.PluginDataProvider
 
 	isImageWithConfig()
 }
@@ -137,6 +140,8 @@ func NewController(
 	moduleKeyProvider bufmodule.ModuleKeyProvider,
 	moduleDataProvider bufmodule.ModuleDataProvider,
 	commitProvider bufmodule.CommitProvider,
+	pluginKeyProvider bufplugin.PluginKeyProvider,
+	pluginDataProvider bufplugin.PluginDataProvider,
 	wktStore bufwktstore.Store,
 	httpClient *http.Client,
 	httpauthAuthenticator httpauth.Authenticator,
@@ -150,6 +155,8 @@ func NewController(
 		moduleKeyProvider,
 		moduleDataProvider,
 		commitProvider,
+		pluginKeyProvider,
+		pluginDataProvider,
 		wktStore,
 		httpClient,
 		httpauthAuthenticator,
@@ -171,6 +178,8 @@ type controller struct {
 	moduleDataProvider bufmodule.ModuleDataProvider
 	graphProvider      bufmodule.GraphProvider
 	commitProvider     bufmodule.CommitProvider
+	pluginKeyProvider  bufplugin.PluginKeyProvider
+	pluginDataProvider bufplugin.PluginDataProvider
 	wktStore           bufwktstore.Store
 
 	disableSymlinks           bool
@@ -194,6 +203,8 @@ func newController(
 	moduleKeyProvider bufmodule.ModuleKeyProvider,
 	moduleDataProvider bufmodule.ModuleDataProvider,
 	commitProvider bufmodule.CommitProvider,
+	pluginKeyProvider bufplugin.PluginKeyProvider,
+	pluginDataProvider bufplugin.PluginDataProvider,
 	wktStore bufwktstore.Store,
 	httpClient *http.Client,
 	httpauthAuthenticator httpauth.Authenticator,
@@ -206,6 +217,7 @@ func newController(
 		graphProvider:      graphProvider,
 		moduleDataProvider: moduleDataProvider,
 		commitProvider:     commitProvider,
+		pluginKeyProvider:  pluginKeyProvider,
 		wktStore:           wktStore,
 	}
 	for _, option := range options {
@@ -414,6 +426,8 @@ func (c *controller) GetTargetImageWithConfigs(
 				lintConfig,
 				breakingConfig,
 				pluginConfigs,
+				c.pluginKeyProvider,
+				c.pluginDataProvider,
 			),
 		}, nil
 	default:
@@ -1064,6 +1078,9 @@ func (c *controller) buildTargetImageWithConfigs(
 				workspace.GetLintConfigForOpaqueID(module.OpaqueID()),
 				workspace.GetBreakingConfigForOpaqueID(module.OpaqueID()),
 				workspace.PluginConfigs(),
+				// TODO(ed): plugin key provider and data provider should come from the workspace.
+				c.pluginKeyProvider, // KeyProvider should read directly from the lockfile.
+				c.pluginDataProvider,
 			),
 		)
 	}

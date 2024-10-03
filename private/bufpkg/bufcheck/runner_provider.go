@@ -15,7 +15,11 @@
 package bufcheck
 
 import (
+	"context"
+	"sync"
+
 	"github.com/bufbuild/buf/private/bufpkg/bufconfig"
+	"github.com/bufbuild/buf/private/bufpkg/bufplugin"
 	"github.com/bufbuild/buf/private/pkg/command"
 	"github.com/bufbuild/buf/private/pkg/pluginrpcutil"
 	"github.com/bufbuild/buf/private/pkg/syserror"
@@ -24,14 +28,23 @@ import (
 )
 
 type runnerProvider struct {
-	commandRunner command.Runner
-	wasmRuntime   wasm.Runtime
+	commandRunner      command.Runner
+	wasmRuntime        wasm.Runtime
+	pluginKeyProvider  bufplugin.PluginKeyProvider
+	pluginDataProvider bufplugin.PluginDataProvider
 }
 
-func newRunnerProvider(commandRunner command.Runner, wasmRuntime wasm.Runtime) *runnerProvider {
+func newRunnerProvider(
+	commandRunner command.Runner,
+	wasmRuntime wasm.Runtime,
+	pluginKeyProvider bufplugin.PluginKeyProvider,
+	pluginDataProvider bufplugin.PluginDataProvider,
+) *runnerProvider {
 	return &runnerProvider{
-		commandRunner: commandRunner,
-		wasmRuntime:   wasmRuntime,
+		commandRunner:      commandRunner,
+		wasmRuntime:        wasmRuntime,
+		pluginKeyProvider:  pluginKeyProvider,
+		pluginDataProvider: pluginDataProvider,
 	}
 }
 
@@ -53,7 +66,65 @@ func (r *runnerProvider) NewRunner(pluginConfig bufconfig.PluginConfig) (pluginr
 			path[0],
 			path[1:]...,
 		), nil
+	case bufconfig.PluginConfigTypeRemote:
+		var (
+			once              sync.Once
+			compiledModule    wasm.CompiledModule
+			compiledModuleErr error
+		)
+		return rpcRunnerFunc(func(ctx context.Context, env pluginrpc.Env) error {
+			once.Do(func() {
+				compiledModule, compiledModuleErr = r.loadRemotePlugin(ctx, pluginConfig)
+			})
+			if compiledModuleErr != nil {
+				return compiledModuleErr
+			}
+			return compiledModule.Run(ctx, env)
+
+		}), nil
+
 	default:
 		return nil, syserror.Newf("unknown PluginConfigType: %v", pluginConfig.Type())
 	}
+}
+
+type rpcRunnerFunc func(ctx context.Context, env pluginrpc.Env) error
+
+func (f rpcRunnerFunc) Run(ctx context.Context, env pluginrpc.Env) error {
+	return f(ctx, env)
+}
+
+func (r *runnerProvider) loadRemotePlugin(ctx context.Context, pluginConfig bufconfig.PluginConfig) (wasm.CompiledModule, error) {
+	pluginRef := pluginConfig.PluginRef()
+	if pluginRef == nil {
+		return nil, syserror.New("pluginRef is required for remote plugins")
+	}
+	pluginKeys, err := r.pluginKeyProvider.GetPluginKeysForPluginRefs(
+		ctx,
+		[]bufplugin.PluginRef{pluginRef},
+		bufplugin.DigestTypeP1,
+	)
+	if err != nil {
+		return nil, err
+	}
+	if len(pluginKeys) != 1 {
+		return nil, syserror.Newf("expected 1 plugin key for %s", pluginRef)
+	}
+	pluginDatas, err := r.pluginDataProvider.GetPluginDatasForPluginKeys(
+		ctx,
+		[]bufplugin.PluginKey{pluginKeys[0]},
+	)
+	if err != nil {
+		return nil, err
+	}
+	if len(pluginDatas) != 1 {
+		return nil, syserror.Newf("expected 1 plugin data for %s", pluginRef)
+	}
+	pluginData := pluginDatas[0]
+
+	data, err := pluginData.Data()
+	if err != nil {
+		return nil, err
+	}
+	return r.wasmRuntime.Compile(ctx, pluginConfig.Name(), data)
 }

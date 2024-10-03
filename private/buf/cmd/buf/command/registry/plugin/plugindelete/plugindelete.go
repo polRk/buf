@@ -17,28 +17,29 @@ package plugindelete
 import (
 	"context"
 	"fmt"
-	"strings"
 
+	pluginv1beta1 "buf.build/gen/go/bufbuild/registry/protocolbuffers/go/buf/registry/plugin/v1beta1"
 	"connectrpc.com/connect"
 	"github.com/bufbuild/buf/private/buf/bufcli"
-	"github.com/bufbuild/buf/private/bufpkg/bufremoteplugin/bufremotepluginref"
-	"github.com/bufbuild/buf/private/gen/proto/connect/buf/alpha/registry/v1alpha1/registryv1alpha1connect"
-	registryv1alpha1 "github.com/bufbuild/buf/private/gen/proto/go/buf/alpha/registry/v1alpha1"
+	"github.com/bufbuild/buf/private/bufpkg/bufapi"
+	"github.com/bufbuild/buf/private/bufpkg/bufplugin"
 	"github.com/bufbuild/buf/private/pkg/app/appcmd"
 	"github.com/bufbuild/buf/private/pkg/app/appext"
-	"github.com/bufbuild/buf/private/pkg/connectclient"
+	"github.com/bufbuild/buf/private/pkg/syserror"
 	"github.com/spf13/pflag"
 )
 
-// NewCommand returns a new Command.
+const forceFlagName = "force"
+
+// NewCommand returns a new Command
 func NewCommand(
 	name string,
 	builder appext.SubCommandBuilder,
 ) *appcmd.Command {
 	flags := newFlags()
 	return &appcmd.Command{
-		Use:   name + " <buf.build/owner/plugin[:version]>",
-		Short: "Delete a plugin from the registry",
+		Use:   name + " <remote/owner/plugin>",
+		Short: "Delete a BSR plugin",
 		Args:  appcmd.ExactArgs(1),
 		Run: builder.NewRunFunc(
 			func(ctx context.Context, container appext.Container) error {
@@ -49,53 +50,65 @@ func NewCommand(
 	}
 }
 
-type flags struct{}
+type flags struct {
+	Force bool
+}
 
 func newFlags() *flags {
 	return &flags{}
 }
 
-func (f *flags) Bind(flagSet *pflag.FlagSet) {}
+func (f *flags) Bind(flagSet *pflag.FlagSet) {
+	flagSet.BoolVar(
+		&f.Force,
+		forceFlagName,
+		false,
+		"Force deletion without confirming. Use with caution",
+	)
+}
 
 func run(
 	ctx context.Context,
 	container appext.Container,
 	flags *flags,
 ) error {
-	bufcli.WarnBetaCommand(ctx, container)
-	identity, version, _ := strings.Cut(container.Arg(0), ":")
-	pluginIdentity, err := bufremotepluginref.PluginIdentityForString(identity)
+	pluginFullName, err := bufplugin.ParsePluginFullName(container.Arg(0))
 	if err != nil {
 		return appcmd.WrapInvalidArgumentError(err)
 	}
-	if version != "" {
-		if err := bufremotepluginref.ValidatePluginVersion(version); err != nil {
-			return appcmd.WrapInvalidArgumentError(err)
+	if !flags.Force {
+		if err := bufcli.PromptUserForDelete(container, "entity", pluginFullName.Name()); err != nil {
+			return err
 		}
 	}
 	clientConfig, err := bufcli.NewConnectClientConfig(container)
 	if err != nil {
 		return err
 	}
-	service := connectclient.Make(
-		clientConfig,
-		pluginIdentity.Remote(),
-		registryv1alpha1connect.NewPluginCurationServiceClient,
-	)
-	if _, err := service.DeleteCuratedPlugin(
-		ctx,
-		connect.NewRequest(
-			&registryv1alpha1.DeleteCuratedPluginRequest{
-				Owner:   pluginIdentity.Owner(),
-				Name:    pluginIdentity.Plugin(),
-				Version: version,
+	pluginServiceClient := bufapi.NewClientProvider(clientConfig).
+		PluginV1Beta1PluginServiceClient(pluginFullName.Registry())
+
+	if _, err := pluginServiceClient.DeletePlugins(ctx, connect.NewRequest(
+		&pluginv1beta1.DeletePluginsRequest{
+			PluginRefs: []*pluginv1beta1.PluginRef{
+				{
+					Value: &pluginv1beta1.PluginRef_Name_{
+						Name: &pluginv1beta1.PluginRef_Name{
+							Owner:  pluginFullName.Owner(),
+							Plugin: pluginFullName.Name(),
+						},
+					},
+				},
 			},
-		),
-	); err != nil {
+		},
+	)); err != nil {
 		if connect.CodeOf(err) == connect.CodeNotFound {
-			return fmt.Errorf("the plugin %s does not exist", container.Arg(0))
+			return bufcli.NewPluginNotFoundError(container.Arg(0))
 		}
 		return err
+	}
+	if _, err := fmt.Fprintf(container.Stdout(), "Deleted %s.\n", pluginFullName); err != nil {
+		return syserror.Wrap(err)
 	}
 	return nil
 }

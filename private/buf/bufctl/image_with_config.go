@@ -17,14 +17,17 @@ package bufctl
 import (
 	"github.com/bufbuild/buf/private/bufpkg/bufconfig"
 	"github.com/bufbuild/buf/private/bufpkg/bufimage"
+	"github.com/bufbuild/buf/private/bufpkg/bufplugin"
 )
 
 type imageWithConfig struct {
 	bufimage.Image
 
-	lintConfig     bufconfig.LintConfig
-	breakingConfig bufconfig.BreakingConfig
-	pluginConfigs  []bufconfig.PluginConfig
+	lintConfig         bufconfig.LintConfig
+	breakingConfig     bufconfig.BreakingConfig
+	pluginConfigs      []bufconfig.PluginConfig
+	pluginKeyProvider  bufplugin.PluginKeyProvider
+	pluginDataProvider bufplugin.PluginDataProvider
 }
 
 func newImageWithConfig(
@@ -32,12 +35,16 @@ func newImageWithConfig(
 	lintConfig bufconfig.LintConfig,
 	breakingConfig bufconfig.BreakingConfig,
 	pluginConfigs []bufconfig.PluginConfig,
+	pluginKeyProvider bufplugin.PluginKeyProvider,
+	pluginDataProvider bufplugin.PluginDataProvider,
 ) *imageWithConfig {
 	return &imageWithConfig{
-		Image:          image,
-		lintConfig:     lintConfig,
-		breakingConfig: breakingConfig,
-		pluginConfigs:  pluginConfigs,
+		Image:              image,
+		lintConfig:         lintConfig,
+		breakingConfig:     breakingConfig,
+		pluginConfigs:      pluginConfigs,
+		pluginKeyProvider:  pluginKeyProvider,
+		pluginDataProvider: pluginDataProvider,
 	}
 }
 
@@ -51,6 +58,14 @@ func (i *imageWithConfig) BreakingConfig() bufconfig.BreakingConfig {
 
 func (i *imageWithConfig) PluginConfigs() []bufconfig.PluginConfig {
 	return i.pluginConfigs
+}
+
+func (i *imageWithConfig) PluginKeyProvider() bufplugin.PluginKeyProvider {
+	return i.pluginKeyProvider
+}
+
+func (i *imageWithConfig) PluginDataProvider() bufplugin.PluginDataProvider {
+	return i.pluginDataProvider
 }
 
 func (*imageWithConfig) isImageWithConfig() {}

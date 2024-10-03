@@ -27,6 +27,10 @@ import (
 	"github.com/bufbuild/buf/private/bufpkg/bufmodule/bufmoduleapi"
 	"github.com/bufbuild/buf/private/bufpkg/bufmodule/bufmodulecache"
 	"github.com/bufbuild/buf/private/bufpkg/bufmodule/bufmodulestore"
+	"github.com/bufbuild/buf/private/bufpkg/bufplugin"
+	"github.com/bufbuild/buf/private/bufpkg/bufplugin/bufpluginapi"
+	"github.com/bufbuild/buf/private/bufpkg/bufplugin/bufplugincache"
+	"github.com/bufbuild/buf/private/bufpkg/bufplugin/bufpluginstore"
 	"github.com/bufbuild/buf/private/pkg/app/appext"
 	"github.com/bufbuild/buf/private/pkg/command"
 	"github.com/bufbuild/buf/private/pkg/filelock"
@@ -103,6 +107,10 @@ var (
 	//
 	// Normalized.
 	v3CacheModuleLockRelDirPath = normalpath.Join("v3", "modulelocks")
+	// v3CachePluginRelDirPath is the relative path to the files cache directory in its newest iteration.
+	//
+	// Normalized.
+	v3CachePluginRelDirPath = normalpath.Join("v3", "plugins")
 	// v3CacheWasmRuntimeRelDirPath is the relative path to the Wasm runtime cache directory in its newest iteration.
 	// This directory is used to store the Wasm runtime cache. This is an implementation specific cache and opaque outside of the runtime.
 	//
@@ -133,6 +141,21 @@ func NewCommitProvider(container appext.Container) (bufmodule.CommitProvider, er
 		return nil, err
 	}
 	return newCommitProvider(
+		container,
+		bufapi.NewClientProvider(
+			clientConfig,
+		),
+	)
+}
+
+// NewPluginDataProvider returns a new PluginDataProvider while creating the
+// required cache directories.
+func NewPluginDataProvider(container appext.Container) (bufplugin.PluginDataProvider, error) {
+	clientConfig, err := NewConnectClientConfig(container)
+	if err != nil {
+		return nil, err
+	}
+	return newPluginDataProvider(
 		container,
 		bufapi.NewClientProvider(
 			clientConfig,
@@ -205,6 +228,33 @@ func newModuleDataProvider(
 			container.Logger(),
 			cacheBucket,
 			filelocker,
+		),
+	), nil
+}
+
+func newPluginDataProvider(
+	container appext.Container,
+	clientProvider bufapi.ClientProvider,
+) (bufplugin.PluginDataProvider, error) {
+	if err := createCacheDir(container.CacheDirPath(), v3CachePluginRelDirPath); err != nil {
+		return nil, err
+	}
+	fullCacheDirPath := normalpath.Join(container.CacheDirPath(), v3CachePluginRelDirPath)
+	storageosProvider := storageos.NewProvider() // No symlinks.
+	cacheBucket, err := storageosProvider.NewReadWriteBucket(fullCacheDirPath)
+	if err != nil {
+		return nil, err
+	}
+	delegateModuleDataProvider := bufpluginapi.NewPluingDataProvider(
+		container.Logger(),
+		clientProvider,
+	)
+	return bufplugincache.NewPluginDataProvider(
+		container.Logger(),
+		delegateModuleDataProvider,
+		bufpluginstore.NewPluginDataStore(
+			container.Logger(),
+			cacheBucket,
 		),
 	), nil
 }

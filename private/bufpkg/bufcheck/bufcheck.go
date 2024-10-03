@@ -22,6 +22,7 @@ import (
 	"buf.build/go/bufplugin/check"
 	"github.com/bufbuild/buf/private/bufpkg/bufconfig"
 	"github.com/bufbuild/buf/private/bufpkg/bufimage"
+	"github.com/bufbuild/buf/private/bufpkg/bufplugin"
 	"github.com/bufbuild/buf/private/pkg/command"
 	"github.com/bufbuild/buf/private/pkg/slicesext"
 	"github.com/bufbuild/buf/private/pkg/syserror"
@@ -179,10 +180,21 @@ func (r RunnerProviderFunc) NewRunner(pluginConfig bufconfig.PluginConfig) (plug
 // The supported types are:
 //   - bufconfig.PluginConfigTypeLocal
 //   - bufconfig.PluginConfigTypeLocalWasm
+//   - bufconfig.PluginConfigTypeRemote
 //
 // If the PluginConfigType is not supported, an error is returned.
-func NewRunnerProvider(commandRunner command.Runner, wasmRuntime wasm.Runtime) RunnerProvider {
-	return newRunnerProvider(commandRunner, wasmRuntime)
+func NewRunnerProvider(
+	commandRunner command.Runner,
+	wasmRuntime wasm.Runtime,
+	pluginKeyProvider bufplugin.PluginKeyProvider,
+	pluginDataProvider bufplugin.PluginDataProvider,
+) RunnerProvider {
+	return newRunnerProvider(
+		commandRunner,
+		wasmRuntime,
+		pluginKeyProvider,
+		pluginDataProvider,
+	)
 }
 
 // NewClient returns a new Client.

@@ -23,6 +23,7 @@ import (
 	"github.com/bufbuild/buf/private/buf/bufctl"
 	"github.com/bufbuild/buf/private/buf/bufworkspace"
 	"github.com/bufbuild/buf/private/bufpkg/bufmodule"
+	"github.com/bufbuild/buf/private/bufpkg/bufplugin"
 	"github.com/bufbuild/buf/private/pkg/app/appext"
 	"github.com/bufbuild/buf/private/pkg/slicesext"
 	"github.com/bufbuild/buf/private/pkg/syserror"
@@ -49,6 +50,24 @@ func ModuleKeysAndTransitiveDepModuleKeysForModuleRefs(
 		return nil, err
 	}
 	return moduleKeysAndTransitiveDepModuleKeysForModuleKeys(ctx, container, moduleKeys)
+}
+
+// TODO(ed)
+func PluginKeysForPluginRefs(
+	ctx context.Context,
+	container appext.Container,
+	pluginRefs []bufplugin.PluginRef,
+) ([]bufplugin.PluginKey, error) {
+	pluginKeyProvider, err := bufcli.NewPluginKeyProvider(container)
+	if err != nil {
+		return nil, err
+	}
+	pluginKeys, err := pluginKeyProvider.GetPluginKeysForPluginRefs(
+		ctx,
+		pluginRefs,
+		bufplugin.DigestTypeP1,
+	)
+	return pluginKeys, err
 }
 
 // Prune prunes the buf.lock.
@@ -105,7 +124,7 @@ func Prune(
 	if err := validateModuleKeysContains(bufYAMLBasedDepModuleKeys, depModuleKeys); err != nil {
 		return err
 	}
-	return workspaceDepManager.UpdateBufLockFile(ctx, depModuleKeys)
+	return workspaceDepManager.UpdateBufLockFile(ctx, depModuleKeys, nil /* TODO(ed) */)
 }
 
 // LogUnusedConfiugredDepsForWorkspace takes a workspace and logs the unused configured
