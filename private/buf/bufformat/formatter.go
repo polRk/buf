@@ -39,6 +39,8 @@ type formatter struct {
 
 	// Current level of indentation.
 	indent int
+	// Symbol for indentation.
+	indentSymb string
 	// The last character written to writer.
 	lastWritten rune
 
@@ -79,6 +81,7 @@ func newFormatter(
 	return &formatter{
 		writer:                   writer,
 		fileNode:                 fileNode,
+		indentSymb:               "  ",
 		overrideTrailingComments: map[ast.Node]ast.Comments{},
 	}
 }
@@ -149,7 +152,7 @@ func (f *formatter) Indent(nextNode ast.Node) {
 			indent--
 		}
 	}
-	f.WriteString(strings.Repeat("  ", indent))
+	f.WriteString(strings.Repeat(f.indentSymb, indent))
 }
 
 // WriteString writes the given element to the generated output.
